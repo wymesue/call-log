@@ -315,7 +315,7 @@
   ]);
   function richHtml(text) {
     const lines = text.replace(/\r/g,'').split('\n');
-    const parts = ['<div style="font:11pt Calibri,Arial,sans-serif;line-height:1.5">'];
+    const parts = ['<div style="font:11pt Calibri,Arial,sans-serif;line-height:1.5;background-color:transparent">'];
     lines.forEach((line, index) => {
       const clean = line.trim();
       const safe = escapeHtml(line);
@@ -362,32 +362,45 @@
     $('previewSection').hidden = false;
     $('previewSection').scrollIntoView({block:'nearest',behavior:'smooth'});
   }
-  function copyNote(text) {
+  async function copyNote(text) {
     if (text === null) return;
-    const temporary = document.createElement('div');
-    temporary.contentEditable = 'true';
-    temporary.style.cssText = 'position:fixed;left:-10000px;top:0';
-    temporary.innerHTML = richHtml(text);
-    document.body.appendChild(temporary);
-    const selection = window.getSelection();
-    const range = document.createRange();
-    range.selectNodeContents(temporary);
-    selection.removeAllRanges();
-    selection.addRange(range);
+    const html = richHtml(text);
     let copied = false;
-    try { copied = document.execCommand('copy'); } catch (error) { /* fallback below */ }
-    selection.removeAllRanges();
-    temporary.remove();
+    // Supplying clean HTML directly avoids copying the browser page's background.
+    if (navigator.clipboard && window.ClipboardItem) {
+      try {
+        await navigator.clipboard.write([new ClipboardItem({
+          'text/html': new Blob([html], {type:'text/html'}),
+          'text/plain': new Blob([text], {type:'text/plain'})
+        })]);
+        copied = true;
+      } catch (error) { /* clipboard access may be blocked in Citrix */ }
+    }
+    if (!copied) {
+      const temporary = document.createElement('div');
+      temporary.contentEditable = 'true';
+      temporary.style.cssText = 'position:fixed;left:-10000px;top:0;background:transparent';
+      temporary.innerHTML = html;
+      document.body.appendChild(temporary);
+      const selection = window.getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(temporary);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      try { copied = document.execCommand('copy'); } catch (error) { /* fallback below */ }
+      selection.removeAllRanges();
+      temporary.remove();
+    }
     if (!copied) {
       $('output').hidden = false;
       $('output').value = text;
       $('output').focus();
       $('output').select();
-      try { copied = document.execCommand('copy'); } catch (error) { /* manual copy */ }
+      $('msg').textContent = 'Press Ctrl+C to copy plain text (no white boxes).';
     } else {
       $('output').hidden = true;
+      $('msg').textContent = 'Copied. Paste into OneNote using Ctrl+V.';
     }
-    $('msg').textContent = copied ? 'Copied. Paste into OneNote using Ctrl+V.' : 'Select the text below and press Ctrl+C.';
   }
   function copyUpdate() {
     const text = makeUpdate();
@@ -421,7 +434,3 @@
 </script>
 </body>
 </html>
-
-
-
-
