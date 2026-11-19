@@ -117,6 +117,12 @@
       <h2>Call Documentation</h2>
       <div class="notes" id="notes"></div>
     </section>
+    <section>
+      <h2>Search Tags</h2>
+      <label>Optional tags (separate multiple tags with commas)
+        <input id="customTags" placeholder="#QA score, #CheckLater">
+      </label>
+    </section>
     <div class="buttons">
       <span id="msg" role="status"></span>
       <div>
@@ -136,11 +142,12 @@
       </label>
       <div class="two details">
         <label>Outcome
-          <select id="outcome">
+          <select id="outcome" onchange="showOutcomeOther()">
             <option>Reached member</option><option>Reached broker</option>
-            <option>Reached auxiliary contact</option><option>Left voicemail</option>
-            <option>Unable to reach</option><option>Other</option>
+            <option>Reached auxiliary contact</option><option>Reached provider</option>
+            <option>Left voicemail</option><option>Unable to reach</option><option>Other</option>
           </select>
+          <input id="outcomeOther" placeholder="Describe other outcome" aria-label="Describe other outcome" hidden>
         </label>
         <label>Current Status
           <select id="newStatus">
@@ -192,6 +199,11 @@
     return [...$(id).querySelectorAll('input:checked')].map(item => item.value);
   }
   function on(id) { return $(id).checked ? 'Yes' : 'No'; }
+  function customTags() {
+    return $('customTags').value.split(',').map(tag => tag.trim())
+      .filter(Boolean).map(tag => tag.startsWith('#') ? tag : '#' + tag)
+      .filter(tag => tag.toLowerCase() !== '#followup');
+  }
   function showFields() {
     $('broker').hidden = $('caller').value !== 'Broker';
     $('ac').hidden = $('caller').value !== 'Auxiliary Contact';
@@ -249,7 +261,8 @@
     section('Call Type & Status');
     line('Call Type',types.join(', '));
     line('Status',statuses.join(', '));
-    if (statuses.includes('Follow Up')) line('Tags','#FollowUp');
+    const tags = [...(statuses.includes('Follow Up') ? ['#FollowUp'] : []), ...customTags()];
+    if (tags.length) line('Tags',[...new Set(tags)].join(', '));
     if (statuses.includes('Follow Up')) line('Follow Up Details',val('Follow Up Details'));
     if (statuses.includes('Escalated')) line('Escalation Details',val('Escalation Details'));
 
@@ -279,6 +292,9 @@
     }
   }
 
+  function showOutcomeOther() {
+    $('outcomeOther').hidden = $('outcome').value !== 'Other';
+  }
   function makeUpdate() {
     const status = $('newStatus').value;
     if (status === 'Resolved' && !val('Final Resolution')) {
@@ -286,15 +302,26 @@
       return null;
     }
     const source = $('previous').value.trim() || original || makeNote();
-    let text = source
-      .replace(/^Status:.*$/m,'Status: ' + status)
-      .replace(/^Tags:.*\n?/gm,'');
-    if (status === 'Follow Up') text = text.replace(/^Status:.*$/m, '$&\nTags: #FollowUp');
+    // Preserve every original line except the current status and active follow-up tag.
+    const originalLines = source.replace(/\r/g, '').split('\n');
+    const statusIndex = originalLines.findIndex(line => /^Status:\s*/.test(line));
+    const tagIndex = originalLines.findIndex(line => /^Tags:\s*/.test(line));
+    if (statusIndex >= 0) originalLines[statusIndex] = 'Status: ' + status;
+    const tags = tagIndex >= 0 ? originalLines[tagIndex].slice(5).split(',') : [];
+    const keptTags = tags.map(tag => tag.replace(/#FollowUp(?=\s|$)/gi, '').trim()).filter(Boolean);
+    if (status === 'Follow Up') keptTags.unshift('#FollowUp');
+    if (tagIndex >= 0) {
+      if (keptTags.length) originalLines[tagIndex] = 'Tags: ' + keptTags.join(', ');
+      else originalLines.splice(tagIndex, 1);
+    } else if (keptTags.length) {
+      originalLines.splice(statusIndex >= 0 ? statusIndex + 1 : originalLines.length, 0,
+        'Tags: ' + keptTags.join(', '));
+    }
+    const text = originalLines.join('\n').trimEnd();
     const lines = [
       '',
       'FOLLOW UP UPDATE - ' + startedFormat(updated) + ', ' + timeFormat(updated),
-      'Outcome: ' + $('outcome').value,
-      'Current Status: ' + status
+      'Outcome: ' + ($('outcome').value === 'Other' ? 'Other: ' + ($('outcomeOther').value.trim() || '-') : $('outcome').value)
     ];
     for (const name of ['Reason For Follow Up','Actions Taken','Final Resolution','Remaining Steps']) {
       lines.push('', name.toUpperCase(), val(name) || '-');
@@ -406,10 +433,6 @@
     const text = makeUpdate();
     if (text === null) return;
     const status = $('newStatus').value;
-    if (!$('previous').value.trim()) {
-      $('statuses').querySelectorAll('input').forEach(item => item.checked = item.value === status);
-      showFields();
-    }
     copyNote(text);
   }
   function newCall() {
@@ -420,6 +443,7 @@
     });
     $('caller').value = 'Member';
     $('outcome').selectedIndex = 0;
+    showOutcomeOther();
     $('newStatus').value = 'Resolved';
     started = new Date();
     updated = null;
@@ -431,6 +455,7 @@
   }
   $('date').textContent = startedFormat(started) + ' · ' + timeFormat(started);
   showFields();
+  showOutcomeOther();
 </script>
 </body>
 </html>
